@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdio_ext.h>
 #include <stdlib.h>
 #include <sys/time.h>
 #include <sys/types.h>
@@ -6,6 +7,9 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <pthread.h>
+
+#define TRUE 1
+#define FALSE 0
 
 /* TOP */
 #define B_T_R "\342\225\224"
@@ -50,10 +54,10 @@
 /* DIMENSIONS */
 #define ROWS 4
 #define COLUMNS 4
+#define DIMENSION 4
 
 /* SPACE */
 #define SPACE_SCORE "                         "
-
 
 typedef struct {
 	int points;
@@ -62,7 +66,8 @@ typedef struct {
 
 typedef struct {
 	int **table;
-	int column; 
+	int dimension;
+	int *status;
 } ARGS;
 
 typedef struct {
@@ -77,8 +82,9 @@ const char *printColor(int);
 void printNumber(int **);
 void printScore(SCORE *);
 void randomNumber(int **);
-void actionFix(void *, int **); 
-void actionSum(void *, int **, SCORE *); 
+void actionFix(void *, int **, int *); 
+void actionSum(void *, int **, SCORE *, int *);
+int actionCheck(int **);
 void* fixUp(void *);
 void* fixDown(void *);
 void* fixRight(void *);
@@ -87,6 +93,9 @@ void* sumUp(void *);
 void* sumDown(void *);
 void* sumRight(void *);
 void* sumLeft(void *);
+void* checkZero(void *);
+void* checkPairsUp(void *);
+void* checkPairsLeft(void *);
 
 int getArrow(void) {
 	struct termios tAnt, tNovo;
@@ -110,7 +119,9 @@ int getArrow(void) {
 	tcsetattr(STDIN_FILENO, TCSANOW, &tNovo);
 
 	__fpurge(stdin);
-	read(STDIN_FILENO, key, sizeof(char) * 3); 
+	if (read(STDIN_FILENO, key, sizeof(char) * 3) < 0) {
+		fprintf(stderr, "Read: Error in read key.\n");
+	}
 
 	tcsetattr(STDIN_FILENO, TCSANOW, &tAnt);
 
@@ -207,6 +218,17 @@ void printScore(SCORE *score) {
 	printf("\033[u");
 }
 
+int randomValue() {
+	srand(time(NULL));
+	
+	if ((rand() % 100) < 90) {
+		return 2;
+	}
+	else {
+		return 4;
+	}
+}
+
 void randomNumber(int **table) {
 	int value, column, row;
 
@@ -218,13 +240,14 @@ void randomNumber(int **table) {
 		value = *(*(table + row) + column);
 	} while (value != 0);
 
-	value = *(*(table + row) + column) = 2;
+	*(*(table + row) + column) = randomValue();
 }
 
 
 void* fixUp(void *mArgs) {
 	int **table = ((ARGS *) mArgs)->table;
-	int column = ((ARGS *) mArgs)->column;
+	int column = ((ARGS *) mArgs)->dimension;
+	int *change = ((ARGS *) mArgs)->status;
 
 	int i, j, n;
 
@@ -239,6 +262,7 @@ void* fixUp(void *mArgs) {
 			}
 
 			if (n != i) {
+				*change = TRUE;
 				*(*(table + n) + column) = *(*(table + i) + column);
 				*(*(table + i) + column) = 0;
 			}
@@ -250,7 +274,8 @@ void* fixUp(void *mArgs) {
 
 void* fixDown(void *mArgs) {
 	int **table = ((ARGS *) mArgs)->table;
-	int column = ((ARGS *) mArgs)->column;
+	int column = ((ARGS *) mArgs)->dimension;
+	int *change = ((ARGS *) mArgs)->status;
 
 	int i, j, n;
 
@@ -265,6 +290,7 @@ void* fixDown(void *mArgs) {
 			}
 
 			if (n != i) {
+				*change = TRUE;
 				*(*(table + n) + column) = *(*(table + i) + column);
 				*(*(table + i) + column) = 0;
 			}
@@ -276,7 +302,8 @@ void* fixDown(void *mArgs) {
 
 void* fixRight(void *mArgs) {
 	int **table = ((ARGS *) mArgs)->table;
-	int row = ((ARGS *) mArgs)->column;
+	int row = ((ARGS *) mArgs)->dimension;
+	int *change = ((ARGS *) mArgs)->status;
 
 	int i, j, n;
 
@@ -291,6 +318,7 @@ void* fixRight(void *mArgs) {
 			}
 
 			if (n != i) {
+				*change = TRUE;
 				*(*(table + row) + n) = *(*(table + row) + i);
 				*(*(table + row) + i) = 0;
 			}
@@ -302,7 +330,8 @@ void* fixRight(void *mArgs) {
 
 void* fixLeft(void *mArgs) {
 	int **table = ((ARGS *) mArgs)->table;
-	int row = ((ARGS *) mArgs)->column;
+	int row = ((ARGS *) mArgs)->dimension;
+	int *change = ((ARGS *) mArgs)->status;
 
 	int i, j, n;
 
@@ -317,6 +346,7 @@ void* fixLeft(void *mArgs) {
 			}
 
 			if (n != i) {
+				*change = TRUE;
 				*(*(table + row) + n) = *(*(table + row) + i);
 				*(*(table + row) + i) = 0;
 			}
@@ -326,11 +356,11 @@ void* fixLeft(void *mArgs) {
         pthread_exit(NULL);
 }
 
-void actionFix(void *function, int **table) {
+void actionFix(void *function, int **table, int *change) {
 	pthread_t *mThreads;
 	pthread_attr_t *mAttr;
 
-	int columns;
+	int dimension;
 
 	mThreads = malloc(COLUMNS * sizeof(pthread_t));
 	mAttr = malloc(sizeof(pthread_attr_t));
@@ -339,15 +369,17 @@ void actionFix(void *function, int **table) {
 
 	ARGS *mArgs;
 
-	for (columns = 0; columns < COLUMNS; columns++) {
+	for (dimension = 0; dimension < DIMENSION; dimension++) {
 		mArgs = malloc(sizeof(ARGS));
 		mArgs->table = table;
-		mArgs->column = columns;
-		pthread_create((mThreads + columns), mAttr, function, (void *) mArgs);
+		mArgs->dimension = dimension;
+		mArgs->status = change;
+
+		pthread_create((mThreads + dimension), mAttr, function, (void *) mArgs);
 	}
 	
-	for (columns = 0; columns < COLUMNS; columns++) {
-		pthread_join(*(mThreads + columns), NULL);
+	for (dimension = 0; dimension < DIMENSION; dimension++) {
+		pthread_join(*(mThreads + dimension), NULL);
 	}
 	
 	pthread_attr_destroy(mAttr);
@@ -356,11 +388,11 @@ void actionFix(void *function, int **table) {
 	free(mAttr);
 }
 
-void actionSum(void *function, int **table, SCORE *score) {
+void actionSum(void *function, int **table, SCORE *score, int *change) {
 	pthread_t *mThreads;
 	pthread_attr_t *mAttr;
 
-	int columns;
+	int dimension;
 
 	mThreads = malloc(COLUMNS * sizeof(pthread_t));
 	mAttr = malloc(sizeof(pthread_attr_t));
@@ -370,20 +402,21 @@ void actionSum(void *function, int **table, SCORE *score) {
 	SUM *sum;
 	ARGS *mArgs;
 
-	for (columns = 0; columns < COLUMNS; columns++) {
+	for (dimension = 0; dimension < DIMENSION; dimension++) {
 		mArgs = malloc(sizeof(ARGS));
 		mArgs->table = table;
-		mArgs->column = columns;
+		mArgs->dimension = dimension;
+		mArgs->status = change;
 
 		sum = malloc(sizeof(SUM));
 		sum->args = mArgs;
 		sum->score = score;
 
-		pthread_create((mThreads + columns), mAttr, function, (void *) sum);
+		pthread_create((mThreads + dimension), mAttr, function, (void *) sum);
 	}
 	
-	for (columns = 0; columns < COLUMNS; columns++) {
-		pthread_join(*(mThreads + columns), NULL);
+	for (dimension = 0; dimension < DIMENSION; dimension++) {
+		pthread_join(*(mThreads + dimension), NULL);
 	}
 	
 	pthread_attr_destroy(mAttr);
@@ -392,17 +425,122 @@ void actionSum(void *function, int **table, SCORE *score) {
 	free(mAttr);
 }
 
+int actionCheck(int **table) {
+	pthread_t *mThreads;
+	pthread_attr_t *mAttr;
+
+	int dimension;
+	int rows;
+	int check = TRUE;
+
+	mThreads = malloc((COLUMNS + ROWS) * sizeof(pthread_t));
+	mAttr = malloc(sizeof(pthread_attr_t));
+
+        pthread_attr_init(mAttr);
+
+	ARGS *mArgs;
+
+	for (rows = 0; rows < ROWS; rows++) {
+		mArgs = malloc(sizeof(ARGS));
+		mArgs->table = table;
+		mArgs->dimension = rows;
+		mArgs->status = &check;
+
+		pthread_create((mThreads + rows), mAttr, checkZero, (void *) mArgs);
+	}
+	
+	for (rows = 0; rows < ROWS; rows++) {
+		pthread_join(*(mThreads + rows), NULL);
+	}
+
+	if (check) {
+		for (dimension = 0; dimension < DIMENSION; dimension++) {
+			mArgs = malloc(sizeof(ARGS));
+			mArgs->table = table;
+			mArgs->dimension = dimension;
+			mArgs->status = &check;
+
+			pthread_create((mThreads + dimension), mAttr, checkPairsUp, (void *) mArgs);
+			pthread_create((mThreads + dimension + DIMENSION), mAttr, checkPairsLeft, (void *) mArgs);
+		}
+	
+		for (dimension = 0; dimension < DIMENSION; dimension++) {
+			pthread_join(*(mThreads + dimension), NULL);
+			pthread_join(*(mThreads + dimension + DIMENSION), NULL);
+		}
+	}
+
+	pthread_attr_destroy(mAttr);
+
+	free(mThreads);
+	free(mAttr);
+
+	return check;
+}
+
+void *checkZero(void *mArgs) {
+	int **table = ((ARGS *) mArgs)->table;
+	int row = ((ARGS *) mArgs)->dimension;
+	int *check = ((ARGS *) mArgs)->status;
+
+	int i;
+
+	for (i = 0; i < ROWS; i++) {
+		if (*(*(table + row) + i) == 0) {
+			*check = FALSE;
+			break;
+		}
+	}
+
+        pthread_exit(NULL);
+}
+
+void *checkPairsUp(void *mArgs) {
+	int **table = ((ARGS *) mArgs)->table;
+	int column = ((ARGS *) mArgs)->dimension;
+	int *check = ((ARGS *) mArgs)->status;
+
+	int i;
+
+	for (i = COLUMNS - 1; i > 0; i++) {
+		if (*(*(table + i - 1) + column) == *(*(table + i) + column)) {
+			*check = FALSE;
+			break;
+		}
+	}
+
+        pthread_exit(NULL);
+}
+
+void *checkPairsLeft(void *mArgs) {
+	int **table = ((ARGS *) mArgs)->table;
+	int row = ((ARGS *) mArgs)->dimension;
+	int *check = ((ARGS *) mArgs)->status;
+
+	int i;
+
+	for (i = ROWS - 1; i > 0; i++) {
+		if (*(*(table + row) + i - 1) == *(*(table + row) + i)) {
+			*check = FALSE;
+			break;
+		}
+	}
+
+        pthread_exit(NULL);
+}
 
 void *sumUp(void *sum) {
 	int **table = ((SUM *) sum)->args->table;
-	int column = ((SUM *) sum)->args->column;
+	int column = ((SUM *) sum)->args->dimension;
 	SCORE *score = ((SUM *) sum)->score;
+	int *change = ((SUM *) sum)->args->status;
 	
 	int i;
 	
 	for (i = 0; i < ROWS - 1; i++) {
 		if (*(*(table + i) + column) != 0) {
 			if (*(*(table + i + 1) + column) == *(*(table + i) + column)) {
+				*change = TRUE;
 				*(*(table + i) + column) <<= 1;
 				score->points += *(*(table + i) + column);
 				i++;
@@ -416,14 +554,16 @@ void *sumUp(void *sum) {
 
 void *sumDown(void *sum) {
 	int **table = ((SUM *) sum)->args->table;
-	int column = ((SUM *) sum)->args->column;
+	int column = ((SUM *) sum)->args->dimension;
 	SCORE *score = ((SUM *) sum)->score;
+	int *change = ((SUM *) sum)->args->status;
 
 	int i;
 
 	for (i = ROWS - 1; i > 0; i--) {
 		if (*(*(table + i) + column) != 0) {
 			if (*(*(table + i - 1) + column) == *(*(table + i) + column)) {
+				*change = TRUE;
 				*(*(table + i) + column) <<= 1;
 				score->points += *(*(table + i) + column);
 				i--;
@@ -437,14 +577,16 @@ void *sumDown(void *sum) {
 
 void *sumRight(void *sum) {
 	int **table = ((SUM *) sum)->args->table;
-	int row = ((SUM *) sum)->args->column;
+	int row = ((SUM *) sum)->args->dimension;
 	SCORE *score = ((SUM *) sum)->score;
+	int *change = ((SUM *) sum)->args->status;
 	
 	int i;
 	
 	for (i = COLUMNS - 1; i > 0; i--) {
 		if (*(*(table + row) + i) != 0) {
 			if (*(*(table + row) + i - 1) == *(*(table + row) + i)) {
+				*change = TRUE;
 				*(*(table + row) + i) <<= 1;
 				score->points += *(*(table + row) + i);
 				i--;
@@ -458,14 +600,16 @@ void *sumRight(void *sum) {
 
 void *sumLeft(void *sum) {
 	int **table = ((SUM *) sum)->args->table;
-	int row = ((SUM *) sum)->args->column;
+	int row = ((SUM *) sum)->args->dimension;
 	SCORE *score = ((SUM *) sum)->score;
+	int *change = ((SUM *) sum)->args->status;
 	
 	int i;
 
 	for (i = 0; i < COLUMNS - 1; i++) {
 		if (*(*(table + row) + i) != 0) {
 			if (*(*(table + row) + i + 1) == *(*(table + row) + i)) {
+				*change = TRUE;
 				*(*(table + row) + i) <<= 1;
 				score->points += *(*(table + row) + i);
 				i++;
@@ -478,7 +622,7 @@ void *sumLeft(void *sum) {
 }
 
 int main() {
-	int i, j, columns, key;
+	int i, j, key, change;
 
 	SCORE *score = (SCORE *) malloc(sizeof(SCORE));
 	
@@ -506,38 +650,48 @@ int main() {
 	printScore(score);
 	printNumber(table);
 
-	while ( key = getArrow() ) {
+	while ( (key = getArrow()) ) {
+		change = FALSE;
+
 		switch ( key ) {
 			case KEY_UP: {
-				actionFix(fixUp, table);
-				actionSum(sumUp, table, score);
-				actionFix(fixUp, table);
+				actionFix(fixUp, table, &change);
+				actionSum(sumUp, table, score, &change);
+				actionFix(fixUp, table, &change);
 				break;
 			}
 
 			case KEY_DOWN: {
-				actionFix(fixDown, table);
-				actionSum(sumDown, table, score);
-				actionFix(fixDown, table);
+				actionFix(fixDown, table, &change);
+				actionSum(sumDown, table, score, &change);
+				actionFix(fixDown, table, &change);
 				break;
 			}
 
 			case KEY_RIGHT: {
-				actionFix(fixRight, table);
-				actionSum(sumRight, table, score);
-				actionFix(fixRight, table);
+				actionFix(fixRight, table, &change);
+				actionSum(sumRight, table, score, &change);
+				actionFix(fixRight, table, &change);
 				break;
 			}
 
 			case KEY_LEFT: {
-				actionFix(fixLeft, table);
-				actionSum(sumLeft, table, score);
-				actionFix(fixLeft, table);
+				actionFix(fixLeft, table, &change);
+				actionSum(sumLeft, table, score, &change);
+				actionFix(fixLeft, table, &change);
 				break;
 			}
 		}
 		
-		randomNumber(table);
+		if (change) {
+			randomNumber(table);
+		}
+		else {
+			if (actionCheck(table)) {
+				printf("End Game.\n");
+				break;
+			}
+		}
 
 		printScore(score);
 		printNumber(table);
