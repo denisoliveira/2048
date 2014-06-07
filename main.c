@@ -502,7 +502,7 @@ void *checkPairsUp(void *mArgs) {
 
 	int i;
 
-	for (i = COLUMNS - 1; i > 0; i++) {
+	for (i = COLUMNS - 1; i > 0; i--) {
 		if (*(*(table + i - 1) + column) == *(*(table + i) + column)) {
 			*check = FALSE;
 			break;
@@ -519,7 +519,7 @@ void *checkPairsLeft(void *mArgs) {
 
 	int i;
 
-	for (i = ROWS - 1; i > 0; i++) {
+	for (i = ROWS - 1; i > 0; i--) {
 		if (*(*(table + row) + i - 1) == *(*(table + row) + i)) {
 			*check = FALSE;
 			break;
